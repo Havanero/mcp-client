@@ -186,7 +186,7 @@ for line in sys.stdin:
     if success:
         print(f"✓ Connected to server: {client.server_info}")
         print(f"✓ Found tools: {[t.name for t in client.tools]}")
-        
+
         # Test tool call (response handler already running)
         if client.tools:
             result = await client.call_tool("echo", {"text": "Hello MCP!"})
