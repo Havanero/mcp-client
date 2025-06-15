@@ -72,7 +72,7 @@ class SSEMCPClient:
         self.reconnect_delay = reconnect_delay
         self.session_kwargs = session_kwargs
         self.session: Optional[aiohttp.ClientSession] = None
-        self.logger = logging.getLogger(f"mcp.sse.client")
+        self.logger = logging.getLogger("mcp.sse.client")
 
         # Global event handlers (dependency injection)
         self.global_handlers: Dict[str, List[Callable]] = {
@@ -355,12 +355,20 @@ class SSEMCPClient:
     async def get_tools(self) -> List[Dict[str, Any]]:
         """Get available tools (non-streaming)"""
         async with self.session_context() as session:
-            async with session.get(f"{self.base_url}/tools") as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data.get("tools", [])
-                else:
-                    raise SSEMCPError(f"Failed to get tools: HTTP {response.status}")
+            try:
+                async with session.get(f"{self.base_url}/tools") as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        tools = data.get("tools", [])
+                        return tools
+                    else:
+                        error_text = await response.text()
+                        self.logger.error(f"❌ Tools request failed: HTTP {response.status} - {error_text}")
+                        raise SSEMCPError(f"Failed to get tools: HTTP {response.status}")
+                        
+            except Exception as e:
+                self.logger.error(f"❌ Tools request exception: {e}")
+                raise
 
     async def get_health(self) -> Dict[str, Any]:
         """Get server health"""
@@ -440,7 +448,7 @@ async def sse_cli():
         print("  stats         - Show server stats")
         print("  exit          - Exit client")
         print("\\n💡 Argument Examples:")
-        print("  JSON:      {\\\"name\\\": \\\"World\\\", \\\"style\\\": \\\"friendly\\\"}")
+        print('  JSON:      {\\"name\\": \\"World\\", \\"style\\": \\"friendly\\"}')
         print("  Key=Value: name=World style=friendly")
         print("  Simple:    Hello world")
         print("  Empty:     [just press Enter]")
@@ -490,39 +498,39 @@ async def _stream_tool_interactive(client: SSEMCPClient, tool_name: str):
     # Get tool arguments
     args_input = input("Arguments (JSON, key=value, or empty): ").strip()
     arguments = {}
-    
+
     if args_input:
         # Try JSON first
-        if args_input.startswith('{'):
+        if args_input.startswith("{"):
             try:
                 arguments = json.loads(args_input)
                 print(f"✅ Parsed as JSON: {arguments}")
             except json.JSONDecodeError as e:
                 print(f"❌ Invalid JSON: {e}")
                 return
-        
+
         # Try simple key=value format
-        elif '=' in args_input:
+        elif "=" in args_input:
             try:
                 pairs = args_input.split()
                 for pair in pairs:
-                    if '=' in pair:
-                        key, value = pair.split('=', 1)
+                    if "=" in pair:
+                        key, value = pair.split("=", 1)
                         # Simple type conversion
                         if value.isdigit():
                             arguments[key] = int(value)
-                        elif value.lower() in ['true', 'false']:
-                            arguments[key] = value.lower() == 'true'
+                        elif value.lower() in ["true", "false"]:
+                            arguments[key] = value.lower() == "true"
                         else:
                             arguments[key] = value
                 print(f"✅ Parsed as key=value: {arguments}")
             except Exception as e:
                 print(f"❌ Invalid key=value format: {e}")
                 return
-        
+
         # Fallback: treat as single string argument
         else:
-            arguments = {'query': args_input}
+            arguments = {"query": args_input}
             print(f"✅ Treated as query: {arguments}")
 
     print(f"🚀 Starting stream...")
@@ -531,14 +539,14 @@ async def _stream_tool_interactive(client: SSEMCPClient, tool_name: str):
         async for event in client.stream_tool(tool_name, arguments):
             event_type = event.get("event")
             data = event.get("data", {})
-            
+
             print(f"📨 Event: {event_type} | Data: {data}")  # Debug line
 
             if event_type == "started":
                 print(f"✅ Stream started: {data}")
             elif event_type == "progress":
-                message = data.get('message', 'Processing...')
-                progress = data.get('progress', 0)
+                message = data.get("message", "Processing...")
+                progress = data.get("progress", 0)
                 print(f"📈 Progress: {message} ({progress})")
             elif event_type == "result":
                 print(f"📄 Result:")
@@ -547,14 +555,14 @@ async def _stream_tool_interactive(client: SSEMCPClient, tool_name: str):
                     if isinstance(result, dict) and "content" in result:
                         print(f"  📊 Tool: {data.get('tool', 'unknown')}")
                         for item in result["content"]:
-                            text = item.get('text', str(item))
+                            text = item.get("text", str(item))
                             print(f"  {text}")
                     else:
                         print(f"  {result}")
                 else:
                     print(f"  {data}")
             elif event_type == "completed":
-                duration = data.get('duration', 0)
+                duration = data.get("duration", 0)
                 print(f"🏁 Completed in {duration:.3f}s: {data}")
                 break
             elif event_type == "error":

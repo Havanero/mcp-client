@@ -1,0 +1,20 @@
+# LLM CLI Agent Requirements
+# Core dependencies for the LLM CLI Agent with MCP integration
+
+# HTTP client for API calls
+aiohttp>=3.8.0
+
+# OpenAI API client (you may need to install this separately)
+# openai>=1.0.0
+
+# For JSON parsing and data manipulation (built-in)
+# json, asyncio, logging, os, sys, re
+
+# Note: The agent uses built-in Python libraries where possible
+# Additional dependencies may be needed based on your specific LLM provider
+
+# Development dependencies (optional)
+# pytest>=7.0.0
+# pytest-asyncio>=0.21.0
+# black>=22.0.0
+# mypy>=1.0.0
