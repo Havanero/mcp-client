@@ -15,6 +15,7 @@ from typing import Any, AsyncIterator, Dict, Optional
 @dataclass
 class MCPMessage:
     """MCP protocol message wrapper"""
+
     method: str
     params: Dict[str, Any]
     id: Optional[str] = None
@@ -40,7 +41,7 @@ class StdioTransport:
             *self.server_command,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
         )
         logging.info(f"Connected to MCP server: {' '.join(self.server_command)}")
 
@@ -83,14 +84,20 @@ class StdioTransport:
 # Quick test function
 async def test_transport():
     """Test the stdio transport with a simple echo"""
-    transport = StdioTransport(["python3", "-c", """
+    transport = StdioTransport(
+        [
+            "python3",
+            "-c",
+            """
 import sys, json
 for line in sys.stdin:
     msg = json.loads(line)
     response = {"id": msg.get("id"), "result": {"echo": msg}}
     print(json.dumps(response))
     sys.stdout.flush()
-"""])
+""",
+        ]
+    )
 
     await transport.connect()
 
