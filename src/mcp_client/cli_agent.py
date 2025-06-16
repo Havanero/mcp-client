@@ -13,8 +13,8 @@ from datetime import datetime
 from typing import Optional
 
 from .config import AgentConfig, ConfigManager, get_available_models
-from .llm_client import LLMClientFactory, LLMMessage
-from .mcp_orchestrator import ConversationContext, MCPOrchestrator
+from .llm import LLMClientFactory, LLMMessage
+from .orchestrator import ConversationContext, MCPOrchestrator
 
 
 class CLIAgent:
@@ -69,7 +69,7 @@ class CLIAgent:
 
         try:
             response_parts = []
-            
+
             async for event in self.orchestrator.chat_stream(message, self.context):
                 if event["type"] == "chunk":
                     # Print chunk immediately and collect for return
@@ -80,15 +80,17 @@ class CLIAgent:
                     print(f"\n{event['content']}")
                 elif event["type"] == "error":
                     return event["content"]
-            
+
             response_text = "".join(response_parts)
-            
+
             # Update context manually since we're using the streaming interface
             self.context.messages.append(LLMMessage(role="user", content=message))
-            self.context.messages.append(LLMMessage(role="assistant", content=response_text))
-            
+            self.context.messages.append(
+                LLMMessage(role="assistant", content=response_text)
+            )
+
             return response_text
-            
+
         except Exception as e:
             self.logger.error(f"Chat error: {e}")
             return f"❌ Error: {e}"
@@ -262,7 +264,7 @@ class CLIAgent:
         else:
             logging.getLogger().setLevel(logging.DEBUG)
             print("🔧 Debug mode: ON")
-    
+
     async def _handle_debug_tools_command(self):
         """Handle /debugtools command"""
         if not self.orchestrator:
@@ -277,14 +279,14 @@ class CLIAgent:
             print(f"Tools converted: {debug_info['tools_converted']}")
             print(f"MCP tools: {debug_info['mcp_tools']}")
             print(f"OpenAI tools: {debug_info['openai_tools']}")
-            
-            if debug_info.get('sample_openai_tool'):
+
+            if debug_info.get("sample_openai_tool"):
                 print("\nSample OpenAI tool format:")
-                print(json.dumps(debug_info['sample_openai_tool'], indent=2))
-            
-            if debug_info.get('error'):
+                print(json.dumps(debug_info["sample_openai_tool"], indent=2))
+
+            if debug_info.get("error"):
                 print(f"\n❌ Error: {debug_info['error']}")
-                
+
         except Exception as e:
             print(f"❌ Error debugging tools: {e}")
 

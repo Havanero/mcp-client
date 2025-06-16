@@ -300,7 +300,9 @@ class SSEMCPClient:
                         break
 
                 except asyncio.TimeoutError:
-                    self.logger.warning(f"⏰ Stream timeout, attempting reconnection...")
+                    self.logger.warning(
+                        f"⏰ Stream timeout, attempting reconnection..."
+                    )
                     context.reconnect_attempts += 1
 
                 except Exception as e:
@@ -363,9 +365,13 @@ class SSEMCPClient:
                         return tools
                     else:
                         error_text = await response.text()
-                        self.logger.error(f"❌ Tools request failed: HTTP {response.status} - {error_text}")
-                        raise SSEMCPError(f"Failed to get tools: HTTP {response.status}")
-                        
+                        self.logger.error(
+                            f"❌ Tools request failed: HTTP {response.status} - {error_text}"
+                        )
+                        raise SSEMCPError(
+                            f"Failed to get tools: HTTP {response.status}"
+                        )
+
             except Exception as e:
                 self.logger.error(f"❌ Tools request exception: {e}")
                 raise

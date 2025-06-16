@@ -13,16 +13,15 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-
-from sse_client import SSEMCPClient, SSEMCPError
 from .config import LLMConfig, MCPConfig
-from .llm_client import LLMClient, LLMMessage, LLMResponse
+from .llm import LLMClient, LLMMessage, LLMResponse
+from .transports.sse import SSEMCPClient, SSEMCPError
 
 
 @dataclass
 class ToolCall:
     """Represents a tool call request"""
+
     name: str
     arguments: Dict[str, Any]
     reasoning: str = ""
@@ -31,6 +30,7 @@ class ToolCall:
 @dataclass
 class ToolResult:
     """Represents a tool execution result"""
+
     name: str
     success: bool
     result: Any
@@ -41,6 +41,7 @@ class ToolResult:
 @dataclass
 class ConversationContext:
     """Conversation context with tool history"""
+
     messages: List[LLMMessage] = field(default_factory=list)
     available_tools: List[Dict[str, Any]] = field(default_factory=list)
     tool_calls: List[ToolCall] = field(default_factory=list)
@@ -51,11 +52,11 @@ class ConversationContext:
 class MCPOrchestrator:
     """
     Simplified MCP Orchestrator using native function calling with streaming
-    
+
     Features:
     - Native OpenAI function calling (no JSON parsing!)
     - Hybrid streaming (immediate for chat, delayed for tools)
-    - Direct MCP tool execution 
+    - Direct MCP tool execution
     - Raw response preservation
     - User notifications during tool execution
     """
@@ -65,7 +66,7 @@ class MCPOrchestrator:
         self.mcp_config = mcp_config
         self.mcp_client: Optional[SSEMCPClient] = None
         self.logger = logging.getLogger("mcp.orchestrator")
-        
+
         # Caches for performance
         self._tools_cache: Optional[List[Dict[str, Any]]] = None
 
@@ -95,12 +96,16 @@ class MCPOrchestrator:
             return self._tools_cache
 
         if not self.mcp_client:
-            raise RuntimeError("MCP client not initialized. Use 'async with orchestrator.session():'")
+            raise RuntimeError(
+                "MCP client not initialized. Use 'async with orchestrator.session():'"
+            )
 
         try:
             tools = await self.mcp_client.get_tools()
             self._tools_cache = tools
-            self.logger.info(f"🔧 Discovered {len(tools)} tools: {[t['name'] for t in tools]}")
+            self.logger.info(
+                f"🔧 Discovered {len(tools)} tools: {[t['name'] for t in tools]}"
+            )
             return tools
         except SSEMCPError as e:
             self.logger.error(f"❌ Tool discovery failed: {e}")
@@ -113,24 +118,23 @@ class MCPOrchestrator:
     def _convert_mcp_tools_to_openai(self, tools_tuple: tuple) -> List[Dict[str, Any]]:
         """Convert MCP tools to OpenAI function format"""
         openai_tools = []
-        
+
         for tool_json in tools_tuple:
             tool = json.loads(tool_json)
-            
+
             # Convert MCP tool schema to OpenAI function format
             openai_tool = {
                 "type": "function",
                 "function": {
                     "name": tool["name"],
                     "description": tool.get("description", ""),
-                    "parameters": tool.get("inputSchema", {
-                        "type": "object", 
-                        "properties": {}
-                    })
-                }
+                    "parameters": tool.get(
+                        "inputSchema", {"type": "object", "properties": {}}
+                    ),
+                },
             }
             openai_tools.append(openai_tool)
-        
+
         return openai_tools
 
     async def execute_tool(self, tool_call: ToolCall) -> ToolResult:
@@ -138,14 +142,18 @@ class MCPOrchestrator:
         if not self.mcp_client:
             raise RuntimeError("MCP client not initialized")
 
-        self.logger.info(f"⚡ Executing tool: {tool_call.name} with args: {tool_call.arguments}")
+        self.logger.info(
+            f"⚡ Executing tool: {tool_call.name} with args: {tool_call.arguments}"
+        )
         start_time = asyncio.get_event_loop().time()
 
         try:
             # Execute tool via SSE streaming
             result_data = None
 
-            async for event in self.mcp_client.stream_tool(tool_call.name, tool_call.arguments):
+            async for event in self.mcp_client.stream_tool(
+                tool_call.name, tool_call.arguments
+            ):
                 event_type = event.get("event")
                 data = event.get("data", {})
 
@@ -159,10 +167,7 @@ class MCPOrchestrator:
             duration = asyncio.get_event_loop().time() - start_time
 
             return ToolResult(
-                name=tool_call.name, 
-                success=True, 
-                result=result_data, 
-                duration=duration
+                name=tool_call.name, success=True, result=result_data, duration=duration
             )
 
         except Exception as e:
@@ -178,10 +183,12 @@ class MCPOrchestrator:
                 duration=duration,
             )
 
-    async def chat_stream(self, user_message: str, context: Optional[ConversationContext] = None):
+    async def chat_stream(
+        self, user_message: str, context: Optional[ConversationContext] = None
+    ):
         """
         Streaming chat interface that yields chunks of response
-        
+
         Yields:
             Dict with 'type': 'chunk'|'tool_notification'|'error', 'content': str
         """
@@ -193,9 +200,11 @@ class MCPOrchestrator:
             context.available_tools = await self.discover_tools()
 
         # Convert MCP tools to OpenAI function format
-        tools_tuple = tuple(json.dumps(tool, sort_keys=True) for tool in context.available_tools)
+        tools_tuple = tuple(
+            json.dumps(tool, sort_keys=True) for tool in context.available_tools
+        )
         openai_tools = self._convert_mcp_tools_to_openai(tools_tuple)
-        
+
         if not openai_tools:
             self.logger.warning("⚠️ No tools available")
 
@@ -205,7 +214,7 @@ class MCPOrchestrator:
             "Use the available tools when needed to help the user. "
             "When you receive tool results, format them nicely for the user."
         )
-        
+
         # Build message context
         messages = [LLMMessage(role="system", content=system_prompt)]
         messages.extend(context.messages)
@@ -214,77 +223,88 @@ class MCPOrchestrator:
         try:
             # First, check if LLM wants to use tools (non-streaming)
             initial_response = await self.llm_client.complete(
-                messages, 
-                tools=openai_tools if openai_tools else None,
-                temperature=0.3
+                messages, tools=openai_tools if openai_tools else None, temperature=0.3
             )
-            
+
             if initial_response.tool_calls:
                 # Notify user about tool execution
-                self.logger.info(f"🔧 LLM requested {len(initial_response.tool_calls)} tool calls")
-                
+                self.logger.info(
+                    f"🔧 LLM requested {len(initial_response.tool_calls)} tool calls"
+                )
+
                 for i, tool_call in enumerate(initial_response.tool_calls):
                     func_name = tool_call["function"]["name"]
                     func_args = tool_call["function"]["arguments"]
-                    
+
                     # Notify user
                     yield {
                         "type": "tool_notification",
-                        "content": f"🔍 Using {func_name} tool..."
+                        "content": f"🔍 Using {func_name} tool...",
                     }
-                    
+
                     # Execute tool
-                    result = await self.execute_tool(ToolCall(
-                        name=func_name, 
-                        arguments=json.loads(func_args)
-                    ))
-                    
+                    result = await self.execute_tool(
+                        ToolCall(name=func_name, arguments=json.loads(func_args))
+                    )
+
                     # Store in context
-                    context.tool_calls.append(ToolCall(name=func_name, arguments=json.loads(func_args)))
+                    context.tool_calls.append(
+                        ToolCall(name=func_name, arguments=json.loads(func_args))
+                    )
                     context.tool_results.append(result)
-                    
+
                     # Add to conversation
                     if not messages or messages[-1].role != "assistant":
-                        messages.append(LLMMessage(
-                            role="assistant",
-                            content=initial_response.content or "",
-                            tool_calls=initial_response.tool_calls
-                        ))
-                    
+                        messages.append(
+                            LLMMessage(
+                                role="assistant",
+                                content=initial_response.content or "",
+                                tool_calls=initial_response.tool_calls,
+                            )
+                        )
+
                     # Add tool result
-                    tool_result_content = json.dumps(result.result, indent=2) if result.success else f"Error: {result.error}"
-                    messages.append(LLMMessage(
-                        role="tool",
-                        content=tool_result_content,
-                        name=func_name,
-                        tool_call_id=tool_call["id"]
-                    ))
-                
+                    tool_result_content = (
+                        json.dumps(result.result, indent=2)
+                        if result.success
+                        else f"Error: {result.error}"
+                    )
+                    messages.append(
+                        LLMMessage(
+                            role="tool",
+                            content=tool_result_content,
+                            name=func_name,
+                            tool_call_id=tool_call["id"],
+                        )
+                    )
+
                 # Stream final response after tools
                 yield {
-                    "type": "tool_notification", 
-                    "content": "✅ Tools completed, generating response..."
+                    "type": "tool_notification",
+                    "content": "✅ Tools completed, generating response...",
                 }
-                
+
                 async for chunk in self.llm_client.stream(messages):
                     yield {"type": "chunk", "content": chunk}
-                    
+
             else:
                 # No tools needed - stream immediately
                 async for chunk in self.llm_client.stream(
                     messages,
                     tools=openai_tools if openai_tools else None,
-                    temperature=0.3
+                    temperature=0.3,
                 ):
                     yield {"type": "chunk", "content": chunk}
 
         except Exception as e:
             yield {"type": "error", "content": f"❌ Error: {e}"}
 
-    async def chat(self, user_message: str, context: Optional[ConversationContext] = None) -> Tuple[str, ConversationContext]:
+    async def chat(
+        self, user_message: str, context: Optional[ConversationContext] = None
+    ) -> Tuple[str, ConversationContext]:
         """
         Non-streaming chat interface (for compatibility)
-        
+
         Returns:
             Tuple of (response_text, updated_context)
         """
@@ -292,7 +312,7 @@ class MCPOrchestrator:
             context = ConversationContext()
 
         response_parts = []
-        
+
         async for event in self.chat_stream(user_message, context):
             if event["type"] == "chunk":
                 response_parts.append(event["content"])
@@ -301,13 +321,13 @@ class MCPOrchestrator:
                 self.logger.info(event["content"])
             elif event["type"] == "error":
                 return event["content"], context
-        
+
         response_text = "".join(response_parts)
-        
+
         # Update context
         context.messages.append(LLMMessage(role="user", content=user_message))
         context.messages.append(LLMMessage(role="assistant", content=response_text))
-        
+
         return response_text, context
 
     async def debug_tools(self) -> Dict[str, Any]:
@@ -317,27 +337,31 @@ class MCPOrchestrator:
             "tools_converted": 0,
             "mcp_tools": [],
             "openai_tools": [],
-            "sample_openai_tool": None
+            "sample_openai_tool": None,
         }
-        
+
         try:
             # Test tool discovery
             mcp_tools = await self.discover_tools()
             debug_info["tools_discovered"] = len(mcp_tools)
             debug_info["mcp_tools"] = [t["name"] for t in mcp_tools]
-            
+
             # Test conversion
             if mcp_tools:
-                tools_tuple = tuple(json.dumps(tool, sort_keys=True) for tool in mcp_tools)
+                tools_tuple = tuple(
+                    json.dumps(tool, sort_keys=True) for tool in mcp_tools
+                )
                 openai_tools = self._convert_mcp_tools_to_openai(tools_tuple)
                 debug_info["tools_converted"] = len(openai_tools)
-                debug_info["openai_tools"] = [t["function"]["name"] for t in openai_tools]
+                debug_info["openai_tools"] = [
+                    t["function"]["name"] for t in openai_tools
+                ]
                 if openai_tools:
                     debug_info["sample_openai_tool"] = openai_tools[0]
-                
+
         except Exception as e:
             debug_info["error"] = str(e)
-            
+
         return debug_info
 
     async def get_stats(self) -> Dict[str, Any]:
@@ -361,9 +385,11 @@ class MCPOrchestrator:
 
 
 if __name__ == "__main__":
+
     async def test_orchestrator():
         """Test the simplified MCP orchestrator"""
         import os
+
         from .config import ConfigManager
         from .llm_client import LLMClientFactory
 

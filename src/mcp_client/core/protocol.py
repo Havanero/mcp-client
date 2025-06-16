@@ -10,12 +10,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from transport import MCPMessage, StdioTransport
+from mcp_client.transport import MCPMessage, StdioTransport
 
 
 @dataclass
 class MCPTool:
     """Represents an available MCP tool"""
+
     name: str
     description: str
     input_schema: Dict[str, Any]
@@ -24,6 +25,7 @@ class MCPTool:
 @dataclass
 class MCPClient:
     """Main MCP client with protocol handling"""
+
     transport: StdioTransport
     tools: List[MCPTool] = field(default_factory=list)
     server_info: Dict[str, Any] = field(default_factory=dict)
@@ -49,15 +51,10 @@ class MCPClient:
             method="initialize",
             params={
                 "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": {}  # We want to use tools
-                },
-                "clientInfo": {
-                    "name": "mcp-python-client",
-                    "version": "1.0.0"
-                }
+                "capabilities": {"tools": {}},  # We want to use tools
+                "clientInfo": {"name": "mcp-python-client", "version": "1.0.0"},
             },
-            id=msg_id
+            id=msg_id,
         )
 
         # Set up future for response
@@ -91,23 +88,24 @@ class MCPClient:
             MCPTool(
                 name=tool["name"],
                 description=tool["description"],
-                input_schema=tool["inputSchema"]
+                input_schema=tool["inputSchema"],
             )
             for tool in tools_data
         ]
 
-        logging.info(f"Discovered {len(self.tools)} tools: {[t.name for t in self.tools]}")
+        logging.info(
+            f"Discovered {len(self.tools)} tools: {[t.name for t in self.tools]}"
+        )
 
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    async def call_tool(
+        self, tool_name: str, arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Execute a tool on the MCP server"""
         msg_id = self.transport.next_id()
         call_msg = MCPMessage(
             method="tools/call",
-            params={
-                "name": tool_name,
-                "arguments": arguments
-            },
-            id=msg_id
+            params={"name": tool_name, "arguments": arguments},
+            id=msg_id,
         )
 
         future = asyncio.Future()
@@ -117,8 +115,6 @@ class MCPClient:
         result = await future
 
         return result.get("result", {})
-
-
 
     async def _handle_responses(self) -> None:
         """Background task to handle ongoing server responses"""
@@ -133,12 +129,12 @@ class MCPClient:
 
     async def start_response_handler(self) -> None:
         """Start background response handling (already started in initialize)"""
-        if not hasattr(self, '_response_task'):
+        if not hasattr(self, "_response_task"):
             self._response_task = asyncio.create_task(self._handle_responses())
 
     async def close(self) -> None:
         """Close MCP client connection"""
-        if hasattr(self, '_response_task'):
+        if hasattr(self, "_response_task"):
             self._response_task.cancel()
             try:
                 await self._response_task
