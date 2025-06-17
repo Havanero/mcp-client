@@ -134,6 +134,7 @@ class CLIAgent:
         print("  /help      - Show this help")
         print("  /status    - Show agent status")
         print("  /tools     - List available tools")
+        print("  /reconnect - Reconnect to MCP server and refresh tools")
         print("  /clear     - Clear conversation history")
         print("  /switch    - Switch LLM provider/model")
         print("  /debug     - Toggle debug mode")
@@ -157,6 +158,7 @@ class CLIAgent:
         print("  /help      - Show this help message")
         print("  /status    - Show current agent status")
         print("  /tools     - List all available MCP tools")
+        print("  /reconnect - Reconnect to server and refresh tools")
         print("  /clear     - Clear conversation history")
         print("  /switch    - Switch between LLM providers")
         print("  /debug     - Toggle debug logging")
@@ -290,6 +292,36 @@ class CLIAgent:
         except Exception as e:
             print(f"❌ Error debugging tools: {e}")
 
+    async def _handle_reconnect_command(self):
+        """Handle /reconnect command"""
+        if not self.orchestrator:
+            print("❌ Agent not initialized")
+            return
+
+        try:
+            print("🔄 Reconnecting to MCP server...")
+
+            # Force refresh tools (this will trigger reconnection if needed)
+            tools = await self.orchestrator.refresh_tools()
+
+            print(f"✅ Reconnection successful! Found {len(tools)} tools")
+
+            if tools:
+                print("\n🔧 Available tools:")
+                for tool in tools[:5]:  # Show first 5
+                    print(
+                        f"  • {tool.get('name', 'unnamed')}: {tool.get('description', 'No desc')[:50]}..."
+                    )
+
+                if len(tools) > 5:
+                    print(f"  ... and {len(tools) - 5} more")
+            else:
+                print("⚠️  No tools found after reconnection")
+
+        except Exception as e:
+            print(f"❌ Reconnection failed: {e}")
+            print("💡 Try restarting the agent if issues persist")
+
     async def run_interactive(self):
         """Run interactive CLI session"""
         self._print_banner()
@@ -325,6 +357,8 @@ class CLIAgent:
                                 print(f"\n📊 Status:\n{status}\n")
                             elif command == "tools":
                                 await self._handle_tools_command()
+                            elif command == "reconnect":
+                                await self._handle_reconnect_command()
                             elif command == "clear":
                                 self._handle_clear_command()
                             elif command == "switch":

@@ -74,8 +74,7 @@ class MCPOrchestrator:
     async def session(self):
         """Context manager for MCP session"""
         self.mcp_client = MCPJSONRPCClient(
-            self.mcp_config.base_url,
-            timeout=self.mcp_config.timeout
+            self.mcp_config.base_url, timeout=self.mcp_config.timeout
         )
 
         try:
@@ -83,15 +82,15 @@ class MCPOrchestrator:
             connected = await self.mcp_client.connect()
             if not connected:
                 raise Exception("Failed to connect to MCP server")
-            
+
             health = await self.mcp_client.get_health()
             self.logger.info(f"🌊 Connected to MCP server: {health.get('status')}")
-            
+
             # Discover tools immediately when session starts
             self.logger.info("🔍 Discovering available tools...")
             tools = await self.discover_tools()
             self.logger.info(f"🔧 Session ready with {len(tools)} tools")
-            
+
             yield self
         except Exception as e:
             self.logger.error(f"❌ MCP connection failed: {e}")
@@ -120,7 +119,19 @@ class MCPOrchestrator:
             return tools
         except Exception as e:
             self.logger.error(f"❌ Tool discovery failed: {e}")
+
+            # If we got "server not initialized" error, clear cache to force refresh
+            if "server not initialized" in str(e).lower():
+                self.logger.info("🔄 Clearing tool cache due to server restart")
+                self._tools_cache = None
+
             return []
+
+    async def refresh_tools(self) -> List[Dict[str, Any]]:
+        """Force refresh tool cache (useful after server restart)"""
+        self.logger.info("🔄 Force refreshing tool cache...")
+        self._tools_cache = None  # Clear cache
+        return await self.discover_tools()
 
     @lru_cache(maxsize=1)
     def _convert_mcp_tools_to_openai(self, tools_tuple: tuple) -> List[Dict[str, Any]]:
@@ -194,6 +205,10 @@ class MCPOrchestrator:
         elif not context.available_tools:
             self.logger.info("🔄 Context has no tools, refreshing...")
             context.available_tools = await self.discover_tools()
+        elif len(context.available_tools) == 0:
+            # Force refresh if we had tools before but now have none (server restart?)
+            self.logger.info("🔄 Tool list is empty, attempting refresh...")
+            context.available_tools = await self.refresh_tools()
 
         # Convert MCP tools to OpenAI function format
         tools_tuple = tuple(
@@ -367,10 +382,10 @@ class MCPOrchestrator:
 
         try:
             server_health = await self.mcp_client.get_health()
-            
+
             # Note: JSON-RPC client may not have get_stats method
             mcp_stats = {}
-            if hasattr(self.mcp_client, 'get_stats'):
+            if hasattr(self.mcp_client, "get_stats"):
                 try:
                     mcp_stats = await self.mcp_client.get_stats()
                 except:
