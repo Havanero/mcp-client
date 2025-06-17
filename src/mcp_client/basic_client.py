@@ -30,25 +30,34 @@ class BasicMCPClient:
         
     async def connect(self):
         """Connect to MCP server"""
-        # Create basic MCP client without LLM
-        mcp_config = MCPConfig(base_url=self.mcp_url)
-        
-        # For basic mode, we'll use the transport directly instead of full MCPClient
-        from .transports.sse import SSEMCPClient
-        self.client = SSEMCPClient(self.mcp_url)
-        
         try:
-            health = await self.client.get_health()
-            print(f"✅ Connected to MCP server: {health.get('status', 'unknown')}")
+            # Use proper MCP JSON-RPC transport instead of SSE
+            from .transports.jsonrpc import MCPJSONRPCClient
+            self.client = MCPJSONRPCClient(self.mcp_url)
             
-            # Cache available tools
+            # Connect and perform MCP handshake
+            connected = await self.client.connect()
+            if not connected:
+                raise ConnectionError("Failed to connect")
+            
+            # Get server health and info
+            health = await self.client.get_health()
+            server_name = health.get('server', {}).get('name', 'unknown')
+            protocol = health.get('protocol', 'Unknown')
+            
+            print(f"✅ Connected to MCP server: {server_name}")
+            print(f"📜 Protocol: {protocol}")
+            
+            # Cache available tools using proper MCP method
             self.tools_cache = await self.client.get_tools()
             print(f"🔧 Discovered {len(self.tools_cache)} tools")
             
             return True
+            
         except Exception as e:
             print(f"❌ Failed to connect: {e}")
             print(f"💡 Make sure MCP server is running on {self.mcp_url}")
+            print(f"💡 Try: python mcp_http_server.py")
             return False
     
     async def list_tools(self) -> List[Dict[str, Any]]:
@@ -64,12 +73,12 @@ class BasicMCPClient:
             return []
     
     async def call_tool(self, name: str, arguments: Dict[str, Any] = None) -> Any:
-        """Call a tool directly"""
+        """Call a tool using proper MCP JSON-RPC protocol"""
         if not self.client:
             raise RuntimeError("Not connected")
         
         # Validate tool exists first
-        available_tools = [t["name"] for t in self.tools_cache] if hasattr(self, 'tools_cache') else []
+        available_tools = [t["name"] for t in self.tools_cache] if self.tools_cache else []
         if available_tools and name not in available_tools:
             print(f"❌ Tool '{name}' not found!")
             print(f"💡 Available tools: {', '.join(available_tools)}")
@@ -80,55 +89,33 @@ class BasicMCPClient:
             if arguments:
                 print(f"📝 With arguments: {arguments}")
             
-            result_data = None
-            event_count = 0
+            # Use proper MCP tools/call method
+            result = await self.client.call_tool(name, arguments or {})
+            print(f"✅ Tool execution completed")
             
-            async for event in self.client.stream_tool(name, arguments or {}):
-                event_count += 1
-                event_type = event.get("event")
-                data = event.get("data", {})
-                
-                if event_type == "started":
-                    print(f"🚀 Tool execution started")
-                elif event_type == "progress":
-                    message = data.get("message", "Processing...")
-                    print(f"📈 Progress: {message}")
-                elif event_type == "result":
-                    result_data = data.get("result", data)
-                    print(f"📄 Result received")
-                    break
-                elif event_type == "completed":
-                    print(f"🏁 Completed")
-                    break
-                elif event_type == "error":
-                    error_msg = data.get("error", "Unknown error")
-                    print(f"❌ Tool error: {error_msg}")
-                    raise Exception(error_msg)
-                else:
-                    print(f"📨 Event: {event_type} | {data}")
+            return result
             
-            if event_count == 0:
-                print("⚠️  No response from tool - it might require specific arguments")
+        except Exception as e:
+            print(f"❌ Tool execution failed: {e}")
+            
+            # Provide helpful error context
+            if "not found" in str(e).lower():
+                print(f"💡 Tool '{name}' not available on server")
+            elif "arguments" in str(e).lower() or "required" in str(e).lower():
+                print(f"💡 Check required parameters with: help {name}")
                 # Try to show tool help
-                tool = next((t for t in self.tools_cache if t["name"] == name), None) if hasattr(self, 'tools_cache') else None
+                tool = next((t for t in self.tools_cache if t["name"] == name), None)
                 if tool:
                     schema = tool.get("inputSchema", {})
                     required = schema.get("required", [])
                     if required:
                         print(f"💡 Required parameters: {', '.join(required)}")
                         print(f"💡 Example: call {name} {{\"param\": \"value\"}}")
-            
-            return result_data
-            
-        except Exception as e:
-            print(f"❌ Tool execution failed: {e}")
-            # Provide helpful error context
-            if "404" in str(e):
-                print(f"💡 Tool '{name}' endpoint not found")
             elif "timeout" in str(e).lower():
                 print(f"💡 Tool execution timed out")
             elif "connection" in str(e).lower():
                 print(f"💡 Connection issue - check if MCP server is running")
+            
             raise
     
     async def disconnect(self):
@@ -138,11 +125,11 @@ class BasicMCPClient:
 
 
 async def run_basic_cli():
-    """Run basic MCP CLI interface"""
-    print("🔧 Basic MCP Client - Protocol Only")
-    print("=" * 50)
-    print("This is a pure MCP protocol client without LLM integration.")
-    print("You can discover and execute tools directly.\n")
+    """Run basic MCP CLI interface with proper JSON-RPC protocol"""
+    print("🔧 Basic MCP Client - JSON-RPC 2.0 Protocol")
+    print("=" * 60)
+    print("Pure MCP protocol communication using JSON-RPC 2.0 over HTTP.")
+    print("Maintains full MCP compliance and ecosystem compatibility.\n")
     
     mcp_url = os.getenv("MCP_BASE_URL", "http://localhost:8081")
     client = BasicMCPClient(mcp_url)
@@ -151,6 +138,10 @@ async def run_basic_cli():
         # Connect to server
         connected = await client.connect()
         if not connected:
+            print("💡 Troubleshooting:")
+            print("   1. Start the MCP server: python mcp_http_server.py")
+            print("   2. Check the URL is correct")
+            print("   3. Verify server supports JSON-RPC 2.0")
             return
         
         # List available tools
@@ -170,6 +161,12 @@ async def run_basic_cli():
         print(f"  call opensearch {{\"query\": \"search term\"}}")
         print(f"  call tool_name key=value key2=value2")  # Key=value format")
         print()
+        
+        # Enable debug logging if DEBUG env var is set
+        if os.getenv("DEBUG"):
+            import logging
+            logging.getLogger().setLevel(logging.DEBUG)
+            print("🐛 Debug mode enabled (set DEBUG=1)")
         
         # Interactive loop
         while True:

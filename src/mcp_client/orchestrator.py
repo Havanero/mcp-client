@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .config import LLMConfig, MCPConfig
 from .llm import LLMClient, LLMMessage, LLMResponse
-from .transports.sse import SSEMCPClient, SSEMCPError
+from .transports.jsonrpc import MCPJSONRPCClient
 
 
 @dataclass
@@ -64,7 +64,7 @@ class MCPOrchestrator:
     def __init__(self, llm_client: LLMClient, mcp_config: MCPConfig):
         self.llm_client = llm_client
         self.mcp_config = mcp_config
-        self.mcp_client: Optional[SSEMCPClient] = None
+        self.mcp_client: Optional[MCPJSONRPCClient] = None
         self.logger = logging.getLogger("mcp.orchestrator")
 
         # Caches for performance
@@ -73,21 +73,32 @@ class MCPOrchestrator:
     @asynccontextmanager
     async def session(self):
         """Context manager for MCP session"""
-        self.mcp_client = SSEMCPClient(
+        self.mcp_client = MCPJSONRPCClient(
             self.mcp_config.base_url,
-            timeout=self.mcp_config.timeout,
-            reconnect_delay=self.mcp_config.reconnect_delay,
+            timeout=self.mcp_config.timeout
         )
 
         try:
+            # Connect to server using JSON-RPC
+            connected = await self.mcp_client.connect()
+            if not connected:
+                raise Exception("Failed to connect to MCP server")
+            
             health = await self.mcp_client.get_health()
             self.logger.info(f"🌊 Connected to MCP server: {health.get('status')}")
+            
+            # Discover tools immediately when session starts
+            self.logger.info("🔍 Discovering available tools...")
+            tools = await self.discover_tools()
+            self.logger.info(f"🔧 Session ready with {len(tools)} tools")
+            
             yield self
         except Exception as e:
             self.logger.error(f"❌ MCP connection failed: {e}")
             raise
         finally:
-            await self.mcp_client.disconnect()
+            if self.mcp_client:
+                await self.mcp_client.disconnect()
             self.mcp_client = None
 
     async def discover_tools(self) -> List[Dict[str, Any]]:
@@ -107,11 +118,8 @@ class MCPOrchestrator:
                 f"🔧 Discovered {len(tools)} tools: {[t['name'] for t in tools]}"
             )
             return tools
-        except SSEMCPError as e:
-            self.logger.error(f"❌ Tool discovery failed: {e}")
-            return []
         except Exception as e:
-            self.logger.error(f"❌ Tool discovery exception: {e}")
+            self.logger.error(f"❌ Tool discovery failed: {e}")
             return []
 
     @lru_cache(maxsize=1)
@@ -148,21 +156,9 @@ class MCPOrchestrator:
         start_time = asyncio.get_event_loop().time()
 
         try:
-            # Execute tool via SSE streaming
-            result_data = None
-
-            async for event in self.mcp_client.stream_tool(
+            result_data = await self.mcp_client.call_tool(
                 tool_call.name, tool_call.arguments
-            ):
-                event_type = event.get("event")
-                data = event.get("data", {})
-
-                if event_type == "result":
-                    result_data = data.get("result")
-                    break
-                elif event_type == "error":
-                    error_msg = data.get("error", "Unknown error")
-                    raise Exception(error_msg)
+            )
 
             duration = asyncio.get_event_loop().time() - start_time
 
@@ -370,8 +366,15 @@ class MCPOrchestrator:
             return {"status": "disconnected"}
 
         try:
-            mcp_stats = await self.mcp_client.get_stats()
             server_health = await self.mcp_client.get_health()
+            
+            # Note: JSON-RPC client may not have get_stats method
+            mcp_stats = {}
+            if hasattr(self.mcp_client, 'get_stats'):
+                try:
+                    mcp_stats = await self.mcp_client.get_stats()
+                except:
+                    mcp_stats = {"note": "Stats not available in JSON-RPC transport"}
 
             return {
                 "mcp_server": server_health,

@@ -16,7 +16,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 from .config import AgentConfig, ConfigManager, LLMConfig, MCPConfig
 from .exceptions import MCPClientError, MCPConnectionError, MCPToolError
 from .llm import LLMClient, LLMClientFactory, LLMMessage
-from .transport import SSETransport
+from .transports.jsonrpc import MCPJSONRPCClient
 
 
 @dataclass
@@ -64,7 +64,7 @@ class MCPClient:
     def __init__(self, config: AgentConfig):
         self.config = config
         self.llm_client: Optional[LLMClient] = None
-        self.transport: Optional[SSETransport] = None
+        self.transport: Optional[MCPJSONRPCClient] = None
         self.logger = logging.getLogger("mcp_client.client")
 
         # Tool caching
@@ -107,17 +107,26 @@ class MCPClient:
         # Initialize LLM client
         self.llm_client = LLMClientFactory.create_client(self.config.llm)
 
-        # Initialize transport
-        self.transport = SSETransport(
+        # Initialize transport  
+        self.transport = MCPJSONRPCClient(
             self.config.mcp.base_url,
-            timeout=self.config.mcp.timeout,
-            reconnect_delay=self.config.mcp.reconnect_delay,
+            timeout=self.config.mcp.timeout
         )
 
         try:
             # Test MCP connection
+            connected = await self.transport.connect()
+            if not connected:
+                raise MCPConnectionError("Failed to connect to MCP server")
+            
             health = await self.transport.get_health()
             self.logger.info(f"🌊 Connected to MCP server: {health.get('status')}")
+            
+            # Discover tools immediately when session starts
+            self.logger.info("🔍 Discovering available tools...")
+            tools = await self.discover_tools()
+            self.logger.info(f"🔧 Session ready with {len(tools)} tools")
+            
             yield self
         except Exception as e:
             self.logger.error(f"❌ MCP connection failed: {e}")
@@ -183,25 +192,9 @@ class MCPClient:
         start_time = asyncio.get_event_loop().time()
 
         try:
-            # Execute tool via streaming transport
-            result_data = None
-
-            async for event in self.transport.stream_tool(
+            result_data = await self.transport.call_tool(
                 tool_call.name, tool_call.arguments
-            ):
-                event_type = event.get("event")
-                data = event.get("data", {})
-
-                if event_type == "result":
-                    result_data = data.get("result")
-                    break
-                elif event_type == "error":
-                    error_msg = data.get("error", "Unknown error")
-                    raise MCPToolError(
-                        f"Tool execution failed: {error_msg}",
-                        tool_call.name,
-                        tool_call.arguments,
-                    )
+            )
 
             duration = asyncio.get_event_loop().time() - start_time
 
@@ -372,8 +365,15 @@ class MCPClient:
             return {"status": "disconnected"}
 
         try:
-            server_stats = await self.transport.get_stats()
             server_health = await self.transport.get_health()
+            
+            # Note: JSON-RPC client may not have get_stats method
+            server_stats = {}
+            if hasattr(self.transport, 'get_stats'):
+                try:
+                    server_stats = await self.transport.get_stats()
+                except:
+                    server_stats = {"note": "Stats not available in JSON-RPC transport"}
 
             return {
                 "server": server_health,
