@@ -133,7 +133,6 @@ class MCPOrchestrator:
         self._tools_cache = None  # Clear cache
         return await self.discover_tools()
 
-    @lru_cache(maxsize=1)
     def _convert_mcp_tools_to_openai(self, tools_tuple: tuple) -> List[Dict[str, Any]]:
         """Convert MCP tools to OpenAI function format"""
         openai_tools = []
@@ -199,16 +198,23 @@ class MCPOrchestrator:
         Yields:
             Dict with 'type': 'chunk'|'tool_notification'|'error', 'content': str
         """
+        print(f"DEBUG: chat_stream called with message: {user_message}")
+
         if context is None:
             context = ConversationContext()
             context.available_tools = await self.discover_tools()
+            print(
+                f"DEBUG: New context, discovered {len(context.available_tools)} tools"
+            )
         elif not context.available_tools:
             self.logger.info("🔄 Context has no tools, refreshing...")
             context.available_tools = await self.discover_tools()
+            print(f"DEBUG: Refreshed tools, got {len(context.available_tools)} tools")
         elif len(context.available_tools) == 0:
             # Force refresh if we had tools before but now have none (server restart?)
             self.logger.info("🔄 Tool list is empty, attempting refresh...")
             context.available_tools = await self.refresh_tools()
+            print(f"DEBUG: Force refresh, got {len(context.available_tools)} tools")
 
         # Convert MCP tools to OpenAI function format
         tools_tuple = tuple(
@@ -216,14 +222,29 @@ class MCPOrchestrator:
         )
         openai_tools = self._convert_mcp_tools_to_openai(tools_tuple)
 
+        # DEBUG: Check what we're passing to LLM
+        print(f"DEBUG: Sending {len(openai_tools)} tools to LLM")
+        opensearch_tools = [
+            t for t in openai_tools if t["function"]["name"] == "opensearch"
+        ]
+        if opensearch_tools:
+            print(f"DEBUG: OpenSearch tool schema for LLM:")
+            print(json.dumps(opensearch_tools[0], indent=2))
+
         if not openai_tools:
             self.logger.warning("⚠️ No tools available")
 
-        # System prompt
+        # System prompt with explicit tool usage requirements
         system_prompt = (
             "You are a helpful assistant with access to tools. "
             "Use the available tools when needed to help the user. "
-            "When you receive tool results, format them nicely for the user."
+            "When you receive tool results, format them nicely for the user.\n\n"
+            "CRITICAL TOOL USAGE RULES:\n"
+            "1. ALWAYS provide ALL required parameters for every tool call\n"
+            "2. For opensearch tool: 'query' parameter is MANDATORY - never omit it\n"
+            "3. For requests like 'show current regulations' use: opensearch(query={\"match_all\": {}})\n"
+            '4. For requests like \'search for X\' use: opensearch(query={"match": {"content": "X"}})\n'
+            "5. Check the tool schema and ensure all required parameters are provided"
         )
 
         # Build message context

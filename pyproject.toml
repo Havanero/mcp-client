@@ -56,11 +56,7 @@ Repository = "https://github.com/your-org/mcp-client.git"
 "Bug Tracker" = "https://github.com/your-org/mcp-client/issues"
 
 [project.scripts]
-mcp = "mcp_client.cli:main"
 mcp-client = "mcp_client.cli:main"
-mcp-agent = "mcp_client.cli:agent_main"
-mcp-basic = "mcp_client.cli:basic_client_main"
-mcp-enhanced = "mcp_client.enhanced_basic_client:main"
 
 [tool.hatch.version]
 path = "src/mcp_client/__init__.py"

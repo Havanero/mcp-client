@@ -107,10 +107,9 @@ class MCPClient:
         # Initialize LLM client
         self.llm_client = LLMClientFactory.create_client(self.config.llm)
 
-        # Initialize transport  
+        # Initialize transport
         self.transport = MCPJSONRPCClient(
-            self.config.mcp.base_url,
-            timeout=self.config.mcp.timeout
+            self.config.mcp.base_url, timeout=self.config.mcp.timeout
         )
 
         try:
@@ -118,15 +117,15 @@ class MCPClient:
             connected = await self.transport.connect()
             if not connected:
                 raise MCPConnectionError("Failed to connect to MCP server")
-            
+
             health = await self.transport.get_health()
             self.logger.info(f"🌊 Connected to MCP server: {health.get('status')}")
-            
+
             # Discover tools immediately when session starts
             self.logger.info("🔍 Discovering available tools...")
             tools = await self.discover_tools()
             self.logger.info(f"🔧 Session ready with {len(tools)} tools")
-            
+
             yield self
         except Exception as e:
             self.logger.error(f"❌ MCP connection failed: {e}")
@@ -165,9 +164,13 @@ class MCPClient:
     def _convert_mcp_tools_to_openai(self, tools_tuple: tuple) -> List[Dict[str, Any]]:
         """Convert MCP tools to OpenAI function format"""
         openai_tools = []
+        print("callong")
 
         for tool_json in tools_tuple:
             tool = json.loads(tool_json)
+            print("XXXX", tool)
+            if tool["name"] == "opensearch":
+                print(f"DEBUG opensearch schema: {tool.get('inputSchema', 'MISSING')}")
 
             openai_tool = {
                 "type": "function",
@@ -239,6 +242,15 @@ class MCPClient:
         tools_tuple = tuple(
             json.dumps(tool, sort_keys=True) for tool in context.available_tools
         )
+        self.logging.debug(f"DEBUG: tools_tuple length: {len(tools_tuple)}")
+        if context.available_tools:
+            opensearch_tool = [
+                t for t in context.available_tools if t.get("name") == "opensearch"
+            ]
+            if opensearch_tool:
+                self.logging.debug(
+                    f"DEBUG: opensearch from discover_tools: {opensearch_tool[0]}"
+                )
         openai_tools = self._convert_mcp_tools_to_openai(tools_tuple)
 
         # Build messages
@@ -366,10 +378,10 @@ class MCPClient:
 
         try:
             server_health = await self.transport.get_health()
-            
+
             # Note: JSON-RPC client may not have get_stats method
             server_stats = {}
-            if hasattr(self.transport, 'get_stats'):
+            if hasattr(self.transport, "get_stats"):
                 try:
                     server_stats = await self.transport.get_stats()
                 except:

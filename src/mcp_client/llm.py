@@ -130,6 +130,12 @@ class OpenAIClient(LLMClient):
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+            
+            # DEBUG: Print what we're sending to OpenAI (streaming)
+            opensearch_tools = [t for t in tools if t.get('function', {}).get('name') == 'opensearch']
+            if opensearch_tools:
+                print(f"DEBUG OpenAI API streaming - opensearch tool:")
+                print(json.dumps(opensearch_tools[0], indent=2))
 
         try:
             async with session.post(

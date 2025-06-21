@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 MCP Client CLI - Main Entry Point
 
@@ -16,6 +15,7 @@ Usage:
     mcp-agent --basic           # Use basic MCP client
     mcp-agent --provider=openai # Specify LLM provider
 """
+
 import asyncio
 import os
 import sys
@@ -23,9 +23,7 @@ from typing import Optional
 
 import click
 
-from .agent import main as agent_runner
 from .basic_client import main as basic_client_runner  # True basic MCP client
-from .cli_agent import create_agent, create_agent_from_env
 from .cli_agent import main as enhanced_main
 from .config import get_available_models
 
@@ -156,22 +154,5 @@ def cli():
     pass
 
 
-# Register commands
-cli.add_command(main, name="agent")
-cli.add_command(list_models, name="models")
-cli.add_command(doctor, name="doctor")
-
-# Create specific entry points for different use cases
-def agent_main():
-    """Entry point for MCP agent functionality"""
-    print("🤖 Starting MCP Agent (LLM-Enhanced)")
-    asyncio.run(enhanced_main())
-
-def basic_client_main():
-    """Entry point for basic MCP client"""
-    print("🔧 Starting Basic MCP Client (Protocol Only)")
-    asyncio.run(basic_client_runner())
-
-# Make main the default when called directly
 if __name__ == "__main__":
     main()
